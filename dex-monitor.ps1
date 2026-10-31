@@ -1,0 +1,241 @@
+<#
+.SYNOPSIS
+    Monitors for a connected Samsung Galaxy S24 Ultra / S25 Ultra over ADB and
+    automatically launches scrcpy in WUXGA resolution (1920x1200) in desktop/DeX mode.
+
+.DESCRIPTION
+    Continuously listens for ADB device connections. When a supported Samsung Galaxy
+    phone is detected in an authorized state, it configures desktop mode settings
+    and starts scrcpy in 1920x1200 (16:10 aspect ratio) fullscreen mode.
+#>
+
+param(
+    [string]$Resolution = "1920x1200",                               # WUXGA resolution (16:10)
+    [int]$Dpi = 160,                                                 # DPI scale (160: native 1:1 crisp mdpi, 200: 1.25x scale)
+    [string]$ModelPattern = "SM[-_]?S9[1234]8|pa[23]q|e[23]q|e2s",   # S24 Ultra (S928), S25 Ultra (S938), S23 Ultra (S918)
+    [string]$Bitrate = "40M",                                        # Stream bitrate (40M for crisp text over USB)
+    [bool]$Fullscreen = $true,                                       # Open scrcpy in fullscreen by default
+    [switch]$FlexDisplay = $false,                                   # Dynamically match virtual display to window size
+    [string]$CustomScrcpyPath = "",                                  # Optional explicit path to scrcpy.exe
+    [string]$CustomAdbPath = ""                                      # Optional explicit path to adb.exe
+)
+
+# --- Path Discovery ---
+function Find-Executable {
+    param([string]$Name, [string]$ExplicitPath, [string[]]$Fallbacks)
+    if ($ExplicitPath -and (Test-Path $ExplicitPath)) {
+        return (Resolve-Path $ExplicitPath).Path
+    }
+    $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+    foreach ($fb in $Fallbacks) {
+        if ($fb -match "\*") {
+            $matched = Get-ChildItem -Path $fb -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($matched) { return $matched.FullName }
+        } elseif (Test-Path $fb) {
+            return (Resolve-Path $fb).Path
+        }
+    }
+    return $null
+}
+
+function Get-DeviceFriendlyName {
+    param([string]$RawLine, [string]$Model)
+    if ($RawLine -match "SM[-_]?S938" -or $Model -match "SM[-_]?S938" -or $RawLine -match "pa3q|e3q") {
+        return "Samsung Galaxy S25 Ultra"
+    } elseif ($RawLine -match "SM[-_]?S928" -or $Model -match "SM[-_]?S928" -or $RawLine -match "pa2q|e2s") {
+        return "Samsung Galaxy S24 Ultra"
+    } elseif ($RawLine -match "SM[-_]?S918" -or $Model -match "SM[-_]?S918") {
+        return "Samsung Galaxy S23 Ultra"
+    } elseif ($Model) {
+        return "Samsung Galaxy ($Model)"
+    }
+    return "Samsung Galaxy Device"
+}
+
+$wingetBase = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+$adbFallbacks = @(
+    "$wingetBase\Google.PlatformTools*\*\adb.exe",
+    "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe",
+    "C:\platform-tools\adb.exe"
+)
+
+$scrcpyFallbacks = @(
+    "$wingetBase\Genymobile.scrcpy*\*\scrcpy.exe",
+    "$env:LOCALAPPDATA\Programs\scrcpy\scrcpy.exe",
+    "$env:USERPROFILE\scoop\apps\scrcpy\current\scrcpy.exe",
+    "C:\Program Files\scrcpy\scrcpy.exe",
+    "C:\scrcpy\scrcpy.exe"
+)
+
+$adbPath = Find-Executable -Name "adb.exe" -ExplicitPath $CustomAdbPath -Fallbacks $adbFallbacks
+$scrcpyPath = Find-Executable -Name "scrcpy.exe" -ExplicitPath $CustomScrcpyPath -Fallbacks $scrcpyFallbacks
+
+Clear-Host
+Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "      Samsung Galaxy DeX Auto-Launcher (Scrcpy)           " -ForegroundColor Cyan
+Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "Resolution Target : $Resolution (WUXGA 16:10) @ $Dpi DPI" -ForegroundColor Gray
+Write-Host "Display Mode      : $(if ($Fullscreen) { 'Fullscreen' } else { 'Windowed' })" -ForegroundColor Gray
+Write-Host "Bitrate           : $Bitrate" -ForegroundColor Gray
+Write-Host "Supported Devices : Galaxy S24 Ultra, S25 Ultra & Flagship Series" -ForegroundColor Gray
+
+if (-not $adbPath) {
+    Write-Host "[ERROR] adb.exe not found! Please run install-prerequisites.bat." -ForegroundColor Red
+    exit 1
+} else {
+    Write-Host "Using ADB         : $adbPath" -ForegroundColor DarkGray
+}
+
+if (-not $scrcpyPath) {
+    Write-Host "[WARNING] scrcpy.exe not found!" -ForegroundColor Yellow
+    Write-Host "          Run install-prerequisites.bat or 'winget install Genymobile.scrcpy'" -ForegroundColor Yellow
+    Write-Host ""
+} else {
+    Write-Host "Using Scrcpy      : $scrcpyPath" -ForegroundColor DarkGray
+}
+
+Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
+Write-Host "Waiting for your Samsung phone to be plugged in via USB..." -ForegroundColor Green
+Write-Host "Press Ctrl+C to terminate." -ForegroundColor DarkGray
+Write-Host ""
+
+$scrcpyProcess = $null
+$lastReportedState = ""
+
+while ($true) {
+    if (-not $scrcpyPath) {
+        $scrcpyPath = Find-Executable -Name "scrcpy.exe" -ExplicitPath $CustomScrcpyPath -Fallbacks $scrcpyFallbacks
+    }
+
+    $rawOutput = & $adbPath devices -l 2>$null
+    $lines = $rawOutput -split "`r?`n" | Where-Object { $_.Trim() -and -not $_.StartsWith("List of devices") }
+
+    $targetDevice = $null
+    $isUnauthorized = $false
+
+    foreach ($line in $lines) {
+        if ($line -match $ModelPattern) {
+            $parts = -split $line
+            $serial = $parts[0]
+            $state = $parts[1]
+
+            if ($state -eq "device") {
+                $targetDevice = [PSCustomObject]@{
+                    Serial = $serial
+                    Raw = $line
+                    Model = ""
+                }
+                break
+            } elseif ($state -eq "unauthorized") {
+                $isUnauthorized = $true
+            }
+        }
+    }
+
+    # If no specific regex matched, check any connected Samsung phone
+    if (-not $targetDevice -and -not $isUnauthorized) {
+        foreach ($line in $lines) {
+            $parts = -split $line
+            if ($parts.Length -ge 2 -and $parts[1] -eq "device") {
+                $candidateSerial = $parts[0]
+                $devModel = (& $adbPath -s $candidateSerial shell getprop ro.product.model 2>$null).Trim()
+                $devManuf = (& $adbPath -s $candidateSerial shell getprop ro.product.manufacturer 2>$null).Trim()
+                if ($devModel -match $ModelPattern -or $devManuf -like "*samsung*") {
+                    $targetDevice = [PSCustomObject]@{
+                        Serial = $candidateSerial
+                        Raw = $line
+                        Model = $devModel
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    if ($isUnauthorized) {
+        if ($lastReportedState -ne "unauthorized") {
+            Write-Host "[!] Samsung phone detected, but USB Debugging is unauthorized." -ForegroundColor Yellow
+            Write-Host "    Check your phone screen and tap 'Always allow from this computer'." -ForegroundColor Yellow
+            $lastReportedState = "unauthorized"
+        }
+    }
+
+    if ($scrcpyProcess -ne $null -and $scrcpyProcess.HasExited) {
+        Write-Host "[-] Scrcpy session ended." -ForegroundColor Gray
+        $scrcpyProcess = $null
+        $lastReportedState = ""
+    }
+
+    if ($targetDevice -ne $null) {
+        if ($scrcpyProcess -eq $null) {
+            if (-not $scrcpyPath) {
+                Write-Host "[!] Samsung device connected ($($targetDevice.Serial)), but scrcpy is not installed!" -ForegroundColor Red
+                Write-Host "    Run install-prerequisites.bat to install it." -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+                continue
+            }
+
+            $friendlyName = Get-DeviceFriendlyName -RawLine $targetDevice.Raw -Model $targetDevice.Model
+
+            Write-Host "[+] $friendlyName detected! Serial: $($targetDevice.Serial)" -ForegroundColor Green
+            Write-Host "    Configuring desktop mode & freeform window settings..." -ForegroundColor Gray
+            & $adbPath -s $targetDevice.Serial shell settings put global force_desktop_mode_on_external_displays 1 2>$null
+            & $adbPath -s $targetDevice.Serial shell settings put global enable_freeform_support 1 2>$null
+
+            Write-Host "    Starting Scrcpy in WUXGA ($Resolution) Desktop Mode..." -ForegroundColor Cyan
+
+            $env:ADB = $adbPath
+
+            try {
+                $layersKey = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers'
+                if (-not (Test-Path $layersKey)) { New-Item -Path $layersKey -Force | Out-Null }
+                Set-ItemProperty -Path $layersKey -Name $scrcpyPath -Value '~ HIGHDPIAWARE' -ErrorAction SilentlyContinue
+            } catch {}
+
+            $scrcpyArgs = @(
+                "-s", $targetDevice.Serial,
+                "--new-display=$Resolution/$Dpi",
+                "-K",
+                "-M",
+                "-w",
+                "-b", $Bitrate,
+                "--video-codec=h265",
+                ('--window-title="Samsung DeX (' + $friendlyName + ' - WUXGA)"')
+            )
+
+            if ($Fullscreen) {
+                $scrcpyArgs += "-f"
+            }
+
+            if ($FlexDisplay) {
+                $scrcpyArgs += "-x"
+            }
+
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $scrcpyPath
+            $psi.Arguments = $scrcpyArgs -join " "
+            $psi.UseShellExecute = $false
+
+            $scrcpyProcess = [System.Diagnostics.Process]::Start($psi)
+            $lastReportedState = "running"
+        }
+    } else {
+        if ($scrcpyProcess -ne $null) {
+            Write-Host "[-] Device disconnected. Closing Scrcpy..." -ForegroundColor Yellow
+            try {
+                $scrcpyProcess.Kill()
+            } catch {}
+            $scrcpyProcess = $null
+            $lastReportedState = ""
+        }
+        if ($lastReportedState -ne "waiting" -and -not $isUnauthorized) {
+            Write-Host "[*] Waiting for Samsung Galaxy phone connection..." -ForegroundColor DarkGray
+            $lastReportedState = "waiting"
+        }
+    }
+
+    Start-Sleep -Seconds 2
+}
