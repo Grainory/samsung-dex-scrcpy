@@ -1,17 +1,18 @@
 <#
 .SYNOPSIS
     Monitors for a connected Samsung Galaxy S24 Ultra / S25 Ultra over ADB and
-    automatically launches scrcpy in WUXGA resolution (1920x1200) in desktop/DeX mode.
+    automatically launches scrcpy matching the laptop's exact screen resolution in desktop/DeX mode.
 
 .DESCRIPTION
     Continuously listens for ADB device connections. When a supported Samsung Galaxy
-    phone is detected in an authorized state, it configures desktop mode settings
-    and starts scrcpy in 1920x1200 (16:10 aspect ratio) fullscreen mode.
+    phone is detected in an authorized state, it automatically detects the host laptop's
+    native physical display resolution (FHD, WUXGA, 2K, 4K, etc.), configures desktop mode
+    settings, and launches scrcpy in matching fullscreen mode.
 #>
 
 param(
-    [string]$Resolution = "1920x1200",                               # WUXGA resolution (16:10)
-    [int]$Dpi = 160,                                                 # DPI scale (160: native 1:1 crisp mdpi, 200: 1.25x scale)
+    [string]$Resolution = "auto",                                    # "auto" (detects screen) or explicit e.g. 1920x1080, 1920x1200
+    [int]$Dpi = 0,                                                   # 0 = auto (160 for <=1200p, 220 for 1440p/1600p, 320 for 4K)
     [string]$ModelPattern = "SM[-_]?S9[1234]8|pa[23]q|e[23]q|e2s",   # S24 Ultra (S928), S25 Ultra (S938), S23 Ultra (S918)
     [string]$Bitrate = "40M",                                        # Stream bitrate (40M for crisp text over USB)
     [bool]$Fullscreen = $true,                                       # Open scrcpy in fullscreen by default
@@ -19,6 +20,77 @@ param(
     [string]$CustomScrcpyPath = "",                                  # Optional explicit path to scrcpy.exe
     [string]$CustomAdbPath = ""                                      # Optional explicit path to adb.exe
 )
+
+# --- Physical Screen Resolution Detection ---
+function Get-PrimaryDisplayResolution {
+    # Method 1: Win32 API via Add-Type (returns true physical resolution unaffected by Windows DPI scaling)
+    try {
+        $signature = @'
+[DllImport("user32.dll")]
+public static extern IntPtr GetDC(IntPtr hwnd);
+[DllImport("gdi32.dll")]
+public static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+[DllImport("user32.dll")]
+public static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+public static System.Drawing.Size GetPhysicalResolution() {
+    IntPtr hdc = GetDC(IntPtr.Zero);
+    int width = GetDeviceCaps(hdc, 118); // DESKTOPHORZRES
+    int height = GetDeviceCaps(hdc, 117); // DESKTOPVERTRES
+    ReleaseDC(IntPtr.Zero, hdc);
+    return new System.Drawing.Size(width, height);
+}
+'@
+        Add-Type -MemberDefinition $signature -Name "NativeScreen" -Namespace "DisplayUtil" -ReferencedAssemblies "System.Drawing" -ErrorAction Stop
+        $size = [DisplayUtil.NativeScreen]::GetPhysicalResolution()
+        if ($size.Width -gt 0 -and $size.Height -gt 0) {
+            return "$($size.Width)x$($size.Height)"
+        }
+    } catch {}
+
+    # Method 2: CIM Win32_VideoController
+    try {
+        $vc = Get-CimInstance -ClassName Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution -gt 0 } | Select-Object -First 1
+        if ($vc) {
+            return "$($vc.CurrentHorizontalResolution)x$($vc.CurrentVerticalResolution)"
+        }
+    } catch {}
+
+    # Method 3: .NET Windows Forms
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        return "$($bounds.Width)x$($bounds.Height)"
+    } catch {}
+
+    return "1920x1080" # Default fallback
+}
+
+# Resolve Resolution
+if ($Resolution -eq "auto" -or [string]::IsNullOrWhiteSpace($Resolution)) {
+    $effectiveResolution = Get-PrimaryDisplayResolution
+    $isAutoRes = $true
+} else {
+    $effectiveResolution = $Resolution
+    $isAutoRes = $false
+}
+
+# Auto-calculate DPI if not specified
+if ($Dpi -le 0) {
+    if ($effectiveResolution -match "^(\d+)x(\d+)$") {
+        $width = [int]$Matches[1]
+        if ($width -ge 3840) {
+            $effectiveDpi = 320 # 4K displays
+        } elseif ($width -ge 2560) {
+            $effectiveDpi = 220 # 1440p / 1600p displays
+        } else {
+            $effectiveDpi = 160 # 1080p / 1200p displays (native 1:1 mdpi)
+        }
+    } else {
+        $effectiveDpi = 160
+    }
+} else {
+    $effectiveDpi = $Dpi
+}
 
 # --- Path Discovery ---
 function Find-Executable {
@@ -77,7 +149,7 @@ Clear-Host
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "      Samsung Galaxy DeX Auto-Launcher (Scrcpy)           " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "Resolution Target : $Resolution (WUXGA 16:10) @ $Dpi DPI" -ForegroundColor Gray
+Write-Host "Screen Resolution : $effectiveResolution $(if ($isAutoRes) { '(Auto-Detected from Laptop)' } else { '(Custom)' }) @ $effectiveDpi DPI" -ForegroundColor Gray
 Write-Host "Display Mode      : $(if ($Fullscreen) { 'Fullscreen' } else { 'Windowed' })" -ForegroundColor Gray
 Write-Host "Bitrate           : $Bitrate" -ForegroundColor Gray
 Write-Host "Supported Devices : Galaxy S24 Ultra, S25 Ultra & Flagship Series" -ForegroundColor Gray
@@ -181,11 +253,11 @@ while ($true) {
             $friendlyName = Get-DeviceFriendlyName -RawLine $targetDevice.Raw -Model $targetDevice.Model
 
             Write-Host "[+] $friendlyName detected! Serial: $($targetDevice.Serial)" -ForegroundColor Green
-            Write-Host "    Configuring desktop mode & freeform window settings..." -ForegroundColor Gray
+            Write-Host "    Configuring desktop mode & freeform window settings on phone..." -ForegroundColor Gray
             & $adbPath -s $targetDevice.Serial shell settings put global force_desktop_mode_on_external_displays 1 2>$null
             & $adbPath -s $targetDevice.Serial shell settings put global enable_freeform_support 1 2>$null
 
-            Write-Host "    Starting Scrcpy in WUXGA ($Resolution) Desktop Mode..." -ForegroundColor Cyan
+            Write-Host "    Starting Scrcpy at $effectiveResolution Desktop Mode..." -ForegroundColor Cyan
 
             $env:ADB = $adbPath
 
@@ -197,13 +269,13 @@ while ($true) {
 
             $scrcpyArgs = @(
                 "-s", $targetDevice.Serial,
-                "--new-display=$Resolution/$Dpi",
+                "--new-display=$effectiveResolution/$effectiveDpi",
                 "-K",
                 "-M",
                 "-w",
                 "-b", $Bitrate,
                 "--video-codec=h265",
-                ('--window-title="Samsung DeX (' + $friendlyName + ' - WUXGA)"')
+                ('--window-title="Samsung DeX (' + $friendlyName + ' - ' + $effectiveResolution + ')"')
             )
 
             if ($Fullscreen) {

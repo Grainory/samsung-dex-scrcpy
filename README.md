@@ -1,6 +1,6 @@
 # 🚀 Samsung DeX Auto-Launcher for Scrcpy
 
-Automatically trigger a dedicated **WUXGA (1920×1200)** desktop environment on your Windows laptop the moment you plug in your **Samsung Galaxy S24 Ultra, S25 Ultra, or Galaxy flagship** via USB.
+Automatically trigger a dedicated desktop environment on your Windows laptop the moment you plug in your **Samsung Galaxy S24 Ultra, S25 Ultra, or Galaxy flagship** via USB.
 
 Zero capture cards, zero wireless lag, high-bitrate hardware-accelerated video, and true 1:1 pixel sharpness.
 
@@ -8,10 +8,10 @@ Zero capture cards, zero wireless lag, high-bitrate hardware-accelerated video, 
 
 ## ✨ Features
 
-- ⚡ **Auto-Detection**: Listens for your Galaxy S24 Ultra / S25 Ultra over ADB. Plug in your USB cable and desktop mode starts immediately.
-- 🖥️ **WUXGA 16:10 Fullscreen**: Built for modern 1920×1200 laptop screens, mapping 1:1 hardware pixels without black letterboxing or downscale blur.
-- 🎯 **Razor-Sharp Text (160 DPI)**: Configured at true native 1:1 `mdpi` density ($1\text{dp} = 1\text{px}$) with Windows High-DPI blur override.
-- 🚀 **High-Performance USB 3 Stream**: Streams up to **40 Mbps** with hardware-accelerated **H.265** encoding for virtually zero latency and crystal-clear text.
+- 🖥️ **Automatic Screen Resolution Detection**: Automatically detects your laptop screen's physical resolution (**FHD 1920×1080**, **WUXGA 1920×1200**, **2K/QHD 2560×1440**, **QHD+ 2560×1600**, **4K**, etc.) and spawns a pixel-perfect matching display!
+- ⚡ **Plug & Play Auto-Detection**: Listens for your Galaxy S24 Ultra / S25 Ultra over ADB. Plug in your USB cable and desktop mode starts immediately.
+- 🎯 **Razor-Sharp Text (1:1 Native Density)**: Auto-calculates integer `mdpi` density scaling ($1\text{dp} = 1\text{px}$) with Windows High-DPI blur override so fonts are always sharp.
+- 🚀 **High-Performance USB 3 Stream**: Streams at **40 Mbps** with hardware-accelerated **H.265** encoding for virtually zero latency.
 - ⌨️ **Full Desktop Controls**: Passthrough for PC physical keyboard (UHID) and mouse pointer with right-click and scroll wheel support.
 - 🔄 **Auto Re-Arming**: When you disconnect your phone, scrcpy cleans up automatically and stands by for the next plug-in.
 
@@ -21,8 +21,8 @@ Zero capture cards, zero wireless lag, high-bitrate hardware-accelerated video, 
 
 - **Samsung Galaxy S25 Ultra** (`SM-S938B`, `SM-S938U`, etc.)
 - **Samsung Galaxy S24 Ultra** (`SM-S928B`, `SM-S928U`, etc.)
-- **Samsung Galaxy S23 Ultra** (`SM-S918*`) & other Galaxy flagship models with desktop support.
-- **Windows 10 / 11** with a USB 3.0 / USB-C cable.
+- **Samsung Galaxy S23 Ultra** (`SM-S918*`) & other Galaxy flagship models.
+- **Any Windows 10 / 11 laptop or PC** (1080p, 1200p, 1440p, 1600p, 4K) with a USB 3.0 / USB-C cable.
 
 ---
 
@@ -57,7 +57,9 @@ Double-click:
 ```bat
 start-dex.bat
 ```
-Keep the console window open in the background. Whenever your phone is plugged in, **DeX / Desktop Mode** will automatically launch on your screen in crisp 1920×1200 fullscreen!
+Keep the console window open in the background. The script will automatically detect your laptop's screen resolution and launch **DeX / Desktop Mode** in matching fullscreen whenever your phone is connected!
+
+*(Optional: Run `detect-resolution.bat` anytime to preview your screen's detected resolution).*
 
 ---
 
@@ -77,16 +79,19 @@ Keep the console window open in the background. Whenever your phone is plugged i
 
 ## ⚙️ Advanced Customization
 
-You can pass custom parameters via PowerShell:
+You can also pass custom arguments via PowerShell:
 
 ```powershell
-# Custom UI Scale (e.g. 200 DPI for larger text/icons, 160 for sharp compact layout)
+# Manually specify a resolution instead of auto-detecting
+.\dex-monitor.ps1 -Resolution 1920x1080
+
+# Custom UI scale (e.g. 200 DPI for larger elements, 160 for compact)
 .\dex-monitor.ps1 -Dpi 200
 
 # Windowed mode instead of fullscreen
 .\dex-monitor.ps1 -Fullscreen:$false
 
-# Dynamic window resizing (Android resizes to match window dimensions)
+# Dynamic window resizing (Android adapts display to window dimensions)
 .\dex-monitor.ps1 -FlexDisplay
 
 # Custom Bitrate (e.g. 50 Mbps)
@@ -98,8 +103,8 @@ You can pass custom parameters via PowerShell:
 ## ❓ Troubleshooting
 
 - **"Unauthorized device"**: Unlock your phone and accept the prompt asking to "Allow USB debugging". Check "Always allow from this computer".
-- **Pixels look blurry?**: Press `F11` for fullscreen 1:1 hardware pixel mapping. If in windowed mode, press `Alt + G`.
-- **Audio routing**: By default, Android audio forwards directly through your PC speakers via scrcpy.
+- **Pixels look blurry?**: The script auto-detects your native resolution and applies high-DPI scaling overrides. Ensure `scrcpy` is in fullscreen (press `F11`) for exact 1:1 hardware pixel mapping.
+- **Audio routing**: Android audio forwards directly through your PC speakers via scrcpy automatically.
 
 ---
 
