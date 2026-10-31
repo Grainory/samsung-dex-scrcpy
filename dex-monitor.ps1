@@ -155,19 +155,26 @@ Write-Host "Bitrate           : $Bitrate" -ForegroundColor Gray
 Write-Host "Supported Devices : Galaxy S24 Ultra, S25 Ultra & Flagship Series" -ForegroundColor Gray
 
 if (-not $adbPath) {
-    Write-Host "[ERROR] adb.exe not found! Please run install-prerequisites.bat." -ForegroundColor Red
-    exit 1
-} else {
-    Write-Host "Using ADB         : $adbPath" -ForegroundColor DarkGray
+    Write-Host "[!] adb.exe not found. Installing Google Platform Tools via WinGet..." -ForegroundColor Yellow
+    winget install Google.PlatformTools --accept-source-agreements --accept-package-agreements
+    $adbPath = Find-Executable -Name "adb.exe" -ExplicitPath $CustomAdbPath -Fallbacks $adbFallbacks
+    if (-not $adbPath) {
+        Write-Host "[ERROR] Failed to locate adb.exe after installation. Please restart your terminal." -ForegroundColor Red
+        exit 1
+    }
 }
+Write-Host "Using ADB         : $adbPath" -ForegroundColor DarkGray
 
 if (-not $scrcpyPath) {
-    Write-Host "[WARNING] scrcpy.exe not found!" -ForegroundColor Yellow
-    Write-Host "          Run install-prerequisites.bat or 'winget install Genymobile.scrcpy'" -ForegroundColor Yellow
-    Write-Host ""
-} else {
-    Write-Host "Using Scrcpy      : $scrcpyPath" -ForegroundColor DarkGray
+    Write-Host "[!] scrcpy.exe not found. Installing Scrcpy via WinGet..." -ForegroundColor Yellow
+    winget install Genymobile.scrcpy --accept-source-agreements --accept-package-agreements
+    $scrcpyPath = Find-Executable -Name "scrcpy.exe" -ExplicitPath $CustomScrcpyPath -Fallbacks $scrcpyFallbacks
+    if (-not $scrcpyPath) {
+        Write-Host "[ERROR] Failed to locate scrcpy.exe after installation. Please restart your terminal." -ForegroundColor Red
+        exit 1
+    }
 }
+Write-Host "Using Scrcpy      : $scrcpyPath" -ForegroundColor DarkGray
 
 Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
 Write-Host "Waiting for your Samsung phone to be plugged in via USB..." -ForegroundColor Green

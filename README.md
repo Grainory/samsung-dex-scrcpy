@@ -77,14 +77,9 @@ To allow the creation of virtual desktop surfaces on external displays:
 
 The bridge requires `adb` (Android Platform Tools) and `scrcpy` (v3.0+).
 
-To install both automatically via WinGet, run:
+**Zero manual setup required**: `start-dex.bat` automatically verifies both dependencies upon launch. If either component is missing, it installs them automatically via the Windows Package Manager (WinGet).
 
-```bat
-install-prerequisites.bat
-```
-
-Or install manually via terminal:
-
+*(Optional manual installation via terminal):*
 ```powershell
 winget install Google.PlatformTools Genymobile.scrcpy
 ```
@@ -103,8 +98,9 @@ winget install Google.PlatformTools Genymobile.scrcpy
    ```powershell
    .\dex-monitor.ps1
    ```
+   *(On first run, it will automatically install ADB and Scrcpy if they are not already present).*
 
-3. Connect your Galaxy S24 Ultra or S25 Ultra via USB. The script will identify the device, resolve your screen dimensions, and open fullscreen desktop mode immediately.
+3. Connect your Galaxy S24 Ultra or S25 Ultra via USB. The bridge will automatically detect your phone, resolve your laptop's screen resolution, and launch fullscreen desktop mode.
 
 ---
 
@@ -178,11 +174,10 @@ When focused inside the active Scrcpy desktop session:
 
 ```
 samsung-dex-scrcpy/
-├── dex-monitor.ps1          # Core ADB watcher and virtual display engine
-├── start-dex.bat            # Double-click launcher wrapper
-├── detect-resolution.bat    # Standalone screen resolution diagnosis tool
-├── install-prerequisites.bat# Automated WinGet installer for ADB & Scrcpy
+├── dex-monitor.ps1          # Core ADB watcher, auto-installer, and virtual display engine
+├── start-dex.bat            # 1-click launcher with automatic dependency installation
 ├── .gitignore               # Repository ignore specifications
+├── LICENSE                  # MIT License
 └── README.md                # Technical documentation
 ```
 
@@ -195,10 +190,10 @@ samsung-dex-scrcpy/
 * Select the checkbox for "Always allow from this computer" and tap **Allow**.
 
 **Issue: Output appears soft or text is blurred**
-* The bridge runs in borderless fullscreen by default to guarantee 1:1 hardware pixel mapping. If running windowed, press `Alt + G` to eliminate downsampling interpolation, or verify that your laptop's display matches the auto-detected resolution via `detect-resolution.bat`.
+* The bridge runs in borderless fullscreen by default to guarantee 1:1 hardware pixel mapping. If running windowed, press `Alt + G` to eliminate downsampling interpolation, or pass `-FlexDisplay` to dynamically adapt the virtual display to the window dimensions.
 
 **Issue: `adb` or `scrcpy` not found**
-* Run `install-prerequisites.bat` to install them through the Windows Package Manager, or verify the executables are located in your system PATH.
+* `start-dex.bat` installs them automatically via WinGet. If your system restricts package managers, install them manually via `winget install Google.PlatformTools Genymobile.scrcpy` or add their directory to your user PATH.
 
 ---
 
